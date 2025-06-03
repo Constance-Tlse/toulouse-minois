@@ -64,7 +64,7 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /root/minois
+            cd /home/github_deploy/minois
 
             echo "${{ secrets.Minois_deploy }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
