@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - dev
-  pull_request:
-    branches:
-      - dev
 
 env:
   REGISTRY: ghcr.io
@@ -19,7 +16,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      pull-requests: write
 
     steps:
       - name: Checkout repository
@@ -51,4 +47,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            VITE_REACT_APP_HARVARD_MUSEUM_API=${{ secrets.VITE_REACT_APP_HARVARD_MUSEUM_API }} # Ta clé API
+            VITE_REACT_APP_HARVARD_MUSEUM_API=${{ secrets.VITE_REACT_APP_HARVARD_MUSEUM_API }}
