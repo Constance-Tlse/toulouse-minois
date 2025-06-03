@@ -33,7 +33,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.Minois_deploy }} # C'est ce secret qui sera ton token pour pull sur le VPS
+          password: ${{ secrets.Minois_deploy }}
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
