@@ -1,4 +1,4 @@
-FROM node:24-alpine as build-base # Utilise Node.js 24 comme demandé
+FROM node:24-alpine as build-base
 
 ARG VITE_REACT_APP_HARVARD_MUSEUM_API
 ENV VITE_REACT_APP_HARVARD_MUSEUM_API=$VITE_REACT_APP_HARVARD_MUSEUM_API
