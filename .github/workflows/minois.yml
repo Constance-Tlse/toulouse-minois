@@ -13,7 +13,7 @@ env:
   IMAGE_NAME: toulouse-minois
 
 jobs:
-  build-and-push:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     permissions:
@@ -55,3 +55,25 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VITE_REACT_APP_HARVARD_MUSEUM_API=${{ secrets.VITE_REACT_APP_HARVARD_MUSEUM_API }}
+
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/github_deploy/minois
+
+            docker compose down
+
+            echo "${{ secrets.Minois_deploy }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            docker compose pull
+
+            docker compose up -d --remove-orphans
+
+            docker image prune -f
+
+            docker logout ghcr.io
