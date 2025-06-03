@@ -21,9 +21,7 @@ FROM httpd:2.4-alpine
 
 COPY --from=build-base /app/client/dist /usr/local/apache2/htdocs/
 
-RUN rm /usr/local/apache2/conf/httpd.conf
-
-COPY httpd.conf /usr/local/apache2/conf/httpd.conf
+COPY minois.conf /usr/local/apache2/conf/extra/minois.conf
 
 EXPOSE 80
 
