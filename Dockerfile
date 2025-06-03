@@ -1,5 +1,8 @@
 FROM node:24-alpine as build-base # Utilise Node.js 24 comme demandé
 
+ARG VITE_REACT_APP_HARVARD_MUSEUM_API
+ENV VITE_REACT_APP_HARVARD_MUSEUM_API=$VITE_REACT_APP_HARVARD_MUSEUM_API
+
 WORKDIR /app
 
 COPY client/package.json ./client/
