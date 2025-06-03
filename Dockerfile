@@ -23,8 +23,6 @@ COPY --from=build-base /app/client/build /usr/local/apache2/htdocs/
 
 RUN rm /usr/local/apache2/conf/httpd.conf
 
-# Copie ta configuration Apache personnalisée
-# httpd.conf est à la racine de ton monorepo
 COPY httpd.conf /usr/local/apache2/conf/httpd.conf
 
 EXPOSE 80 # Le conteneur expose le port 80 en interne
