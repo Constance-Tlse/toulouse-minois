@@ -3,10 +3,10 @@ name: Minois
 on:
   push:
     branches:
-      - dev
+      - staging
   pull_request:
     branches:
-      - dev
+      - staging
 
 env:
   REGISTRY: ghcr.io
