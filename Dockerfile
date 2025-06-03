@@ -1,4 +1,4 @@
-FROM node:24-alpine as build-base
+FROM node:24-alpine AS build-base
 
 ARG VITE_REACT_APP_HARVARD_MUSEUM_API
 ENV VITE_REACT_APP_HARVARD_MUSEUM_API=$VITE_REACT_APP_HARVARD_MUSEUM_API
@@ -19,7 +19,7 @@ RUN npm run build
 
 FROM httpd:2.4-alpine
 
-COPY --from=build-base /app/client/build /usr/local/apache2/htdocs/
+COPY --from=build-base /app/client/dist /usr/local/apache2/htdocs/
 
 RUN rm /usr/local/apache2/conf/httpd.conf
 
