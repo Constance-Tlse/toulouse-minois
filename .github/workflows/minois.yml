@@ -8,9 +8,12 @@ on:
     branches:
       - staging
 
+  workflow_dispatch:
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: toulouse-minois
+  APP_DIR_SNAILFRONT: /home/deployer-front/minois
 
 jobs:
   build-and-deploy:
@@ -32,7 +35,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
+          username: ${{ secrets.GHCR_USERNAME }}
           password: ${{ secrets.Minois_deploy }}
 
       - name: Extract metadata (tags, labels) for Docker
@@ -44,6 +47,7 @@ jobs:
             type=raw,value=latest
             type=sha,format=short,prefix=sha-
             type=ref,event=branch
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -57,18 +61,38 @@ jobs:
             VITE_REACT_APP_HARVARD_MUSEUM_API=${{ secrets.VITE_REACT_APP_HARVARD_MUSEUM_API }}
 
 
-      - name: Deploy to VPS
+      - name: Deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          host: ${{ secrets.SNAILWEB_HOST }}
+          username: ${{ secrets.SNAILWEB_DEPLOY_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY_SNAILWEB }}
           script: |
-            cd /home/github_deploy/minois
+            mkdir -p ~/.ssh
+            echo "${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}" > ~/.ssh/snailfront_deploy_key
+            chmod 600 ~/.ssh/snailfront_deploy_key
 
-            docker compose down
+            ssh -i ~/.ssh/snailfront_deploy_key \
+                -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null \
+                ${{ secrets.SNAILFRONT_DEPLOY_USERNAME }}@${{ secrets.SNAILFRONT_PRIVATE_IP }} << 'EOF'
+            
+            echo "${{ secrets.Minois_deploy }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
 
-            echo "${{ secrets.Minois_deploy }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            mkdir -p ${{ env.APP_DIR_SNAILFRONT }}
+            cd ${{ env.APP_DIR_SNAILFRONT }}
+
+            cat << 'DOCKER_COMPOSE_EOF' > docker-compose.yml
+            version: '3.8'
+            services:
+              minois-frontend:
+                image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tags }}
+                container_name: minois-frontend
+                restart: unless-stopped
+                ports:
+                  - "80:80" # Votre front-end écoute sur le port 80 en interne, Traefik routé vers ce port
+                  - API_URL=http://your-backend-ip:port
+            DOCKER_COMPOSE_EOF
 
             docker compose pull
 
