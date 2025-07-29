@@ -78,11 +78,22 @@ jobs:
                 -o UserKnownHostsFile=/dev/null \
                 ${{ secrets.SNAILFRONT_DEPLOY_USERNAME }}@${{ secrets.SNAILFRONT_PRIVATE_IP }} << 'EOF'
             
-            echo "${{ secrets.Minois_deploy }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+            # --- Commandes exécutées sur SnailFront ---
+            # Active le mode débogage et fait échouer le script à la première erreur
+            set -euxo pipefail # <<< LIGNE AJOUTÉE POUR LE DÉBOGAGE
 
+            echo "DEBUG: Connexion à GHCR..."
+            echo "${{ secrets.Minois_deploy }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+            echo "DEBUG: Connexion GHCR réussie."
+
+            echo "DEBUG: Création du répertoire de l'application et déplacement..."
             mkdir -p ${{ env.APP_DIR_SNAILFRONT }}
             cd ${{ env.APP_DIR_SNAILFRONT }}
+            echo "DEBUG: Répertoire actuel sur SnailFront : $(pwd)"
+            echo "DEBUG: Contenu du répertoire avant création de docker-compose.yml :"
+            ls -la
 
+            echo "DEBUG: Création de docker-compose.yml..."
             cat << 'DOCKER_COMPOSE_EOF' > docker-compose.yml
             version: '3.8'
             services:
@@ -91,23 +102,23 @@ jobs:
                 container_name: minois-frontend
                 restart: unless-stopped
                 ports:
-                  - "80:80" # Votre front-end écoute sur le port 80 en interne, Traefik routé vers ce port
+                  - "80:80"
                 environment:
-                  - API_URL=http://10.10.10.3:VOTRE_PORT_BACKEND
-                # networks: # Décommenter et définir votre réseau si nécessaire pour la communication inter-conteneurs
-                #   my-frontend-network
-            # networks: # Si vous avez un réseau Docker spécifique sur SnailFront (ex: pour partager avec d'autres services)
-            #   my-frontend-network:
-            #     name: my-frontend-network # Assurez-vous que ce réseau existe sur SnailFront (docker network create my-frontend-network)
+                  - API_URL=http://10.10.10.3:VOTRE_PORT_BACKEND # <<< N'oubliez pas de remplacer VOTRE_PORT_BACKEND
             DOCKER_COMPOSE_EOF
+            echo "DEBUG: docker-compose.yml créé. Contenu :"
+            cat docker-compose.yml # <<< VÉRIFIE LE CONTENU DU FICHIER
+            ls -la # <<< VÉRIFIE L'EXISTENCE ET LES PERMISSIONS
 
+            echo "DEBUG: Pull de l'image Docker..."
             docker compose pull
-
+            echo "DEBUG: Image téléchargée. Lancement des conteneurs..."
             docker compose up -d --remove-orphans
-
+            echo "DEBUG: Conteneurs lancés. Nettoyage des images..."
             docker image prune -f
-
+            echo "DEBUG: Déconnexion de GHCR..."
             docker logout ghcr.io
+            echo "DEBUG: Déploiement sur SnailFront terminé."
             EOF
 
             rm ~/.ssh/snailfront_deploy_key
