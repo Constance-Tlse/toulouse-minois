@@ -1,4 +1,4 @@
-name: Minois
+name: Deploy Minois Front-End
 
 on:
   push:
@@ -16,7 +16,7 @@ env:
   APP_DIR_SNAILFRONT: /home/deployer-front/minois
 
 jobs:
-  build-and-deploy:
+  minois-front-end-deploy:
     runs-on: ubuntu-latest
 
     permissions:
@@ -67,6 +67,7 @@ jobs:
           host: ${{ secrets.SNAILWEB_HOST }}
           username: ${{ secrets.SNAILWEB_DEPLOY_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY_SNAILWEB }}
+          port: 96
           script: |
             mkdir -p ~/.ssh
             echo "${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}" > ~/.ssh/snailfront_deploy_key
@@ -91,7 +92,13 @@ jobs:
                 restart: unless-stopped
                 ports:
                   - "80:80" # Votre front-end écoute sur le port 80 en interne, Traefik routé vers ce port
-                  - API_URL=http://your-backend-ip:port
+                environment:
+                  - API_URL=http://10.10.10.3:VOTRE_PORT_BACKEND
+                # networks: # Décommenter et définir votre réseau si nécessaire pour la communication inter-conteneurs
+                #   my-frontend-network
+            # networks: # Si vous avez un réseau Docker spécifique sur SnailFront (ex: pour partager avec d'autres services)
+            #   my-frontend-network:
+            #     name: my-frontend-network # Assurez-vous que ce réseau existe sur SnailFront (docker network create my-frontend-network)
             DOCKER_COMPOSE_EOF
 
             docker compose pull
@@ -101,3 +108,6 @@ jobs:
             docker image prune -f
 
             docker logout ghcr.io
+            EOF
+
+            rm ~/.ssh/snailfront_deploy_key
