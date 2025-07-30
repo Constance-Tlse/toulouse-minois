@@ -1,89 +1,45 @@
-name: Deploy Minois Front-End
+name: Deploy SnailFront
 
 on:
   push:
     branches:
-      - staging
-  pull_request:
-    branches:
-      - staging
-
-  workflow_dispatch:
+      - main
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: toulouse-minois
-  APP_DIR_SNAILFRONT: /home/deployer-front/minois
+  SSH_HOST: ${{ secrets.SSH_HOST_SNAILFRONT }}
+  SSH_USER: ${{ secrets.SSH_USER_SNAILFRONT }}
+  APP_DIR_SNAILFRONT: ${{ secrets.LINK_SNAILFRONT }}
+  REGISTRY_USERNAME: ${{ secrets.GHCR_USERNAME }}
+  REGISTRY_TOKEN: ${{ secrets.GHCR_TOKEN }}
 
 jobs:
-  minois-front-end-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      packages: write
-      pull-requests: write
-
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Configure SSH Key and Connect to SnailFront
+        id: ssh_to_snailfront
+        run: |
+          echo "DEBUG: Configuration de la clé SSH..."
+          mkdir -p ~/.ssh
+          
+          echo "${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}" > ~/.ssh/snailfront_deploy_key
+          chmod 600 ~/.ssh/snailfront_deploy_key
 
-      - name: Log in to the GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.GHCR_USERNAME }}
-          password: ${{ secrets.Minois_deploy }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest
-            type=sha,format=short,prefix=sha-
-            type=ref,event=branch
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            VITE_REACT_APP_HARVARD_MUSEUM_API=${{ secrets.VITE_REACT_APP_HARVARD_MUSEUM_API }}
-
-
-      - name: Deploy
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SNAILWEB_HOST }}
-          username: ${{ secrets.SNAILWEB_DEPLOY_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY_SNAILWEB }}
-          port: 96
-          script: |
-            mkdir -p ~/.ssh
-            echo "${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}" > ~/.ssh/snailfront_deploy_key
-            chmod 600 ~/.ssh/snailfront_deploy_key
-
-            ssh -i ~/.ssh/snailfront_deploy_key \
-                -o StrictHostKeyChecking=no \
-                -o UserKnownHostsFile=/dev/null \
-                ${{ secrets.SNAILFRONT_DEPLOY_USERNAME }}@${{ secrets.SNAILFRONT_PRIVATE_IP }} << 'EOF'
-            
+          echo "DEBUG: Test de connexion SSH à SnailFront..."
+          ssh -i ~/.ssh/snailfront_deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              "${{ env.SSH_USER }}"@"${{ env.SSH_HOST }}" \
+              "bash -s" << 'EOF_SSH'
             # --- Commandes exécutées sur SnailFront ---
-            # Active le mode débogage et fait échouer le script à la première erreur
-            set -euxo pipefail # <<< LIGNE AJOUTÉE POUR LE DÉBOGAGE
+            set -euxo pipefail
 
             echo "DEBUG: Connexion à GHCR..."
-            echo "${{ secrets.Minois_deploy }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+            echo "${{ env.REGISTRY_TOKEN }}" | docker login ghcr.io -u "${{ env.REGISTRY_USERNAME }}" --password-stdin
             echo "DEBUG: Connexion GHCR réussie."
 
             echo "DEBUG: Création du répertoire de l'application et déplacement..."
@@ -95,30 +51,37 @@ jobs:
 
             echo "DEBUG: Création de docker-compose.yml..."
             cat << 'DOCKER_COMPOSE_EOF' > docker-compose.yml
-            version: '3.8'
-            services:
-              minois-frontend:
-                image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tags }}
-                container_name: minois-frontend
-                restart: unless-stopped
-                ports:
-                  - "80:80"
-                environment:
-                  - API_URL=http://10.10.10.3:VOTRE_PORT_BACKEND # <<< N'oubliez pas de remplacer VOTRE_PORT_BACKEND
-            DOCKER_COMPOSE_EOF
-            echo "DEBUG: docker-compose.yml créé. Contenu :"
-            cat docker-compose.yml # <<< VÉRIFIE LE CONTENU DU FICHIER
-            ls -la # <<< VÉRIFIE L'EXISTENCE ET LES PERMISSIONS
+services:
+  minois-frontend:
+    image: ghcr.io/constance-tlse/toulouse-minois:staging
+    container_name: minois-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      - API_URL=http://10.10.10.3:VOTRE_PORT_BACKEND
+  DOCKER_COMPOSE_EOF
+
+echo "DEBUG: docker-compose.yml créé. Contenu :"
+  cat docker-compose.yml
+  ls -la
 
             echo "DEBUG: Pull de l'image Docker..."
             docker compose pull
             echo "DEBUG: Image téléchargée. Lancement des conteneurs..."
             docker compose up -d --remove-orphans
+
             echo "DEBUG: Conteneurs lancés. Nettoyage des images..."
             docker image prune -f
+
             echo "DEBUG: Déconnexion de GHCR..."
             docker logout ghcr.io
-            echo "DEBUG: Déploiement sur SnailFront terminé."
-            EOF
 
-            rm ~/.ssh/snailfront_deploy_key
+echo "DEBUG: Déploiement sur SnailFront terminé."
+  
+  EOF_SSH
+echo "DEBUG: Déconnexion SSH effectuée."
+
+  - name: Clean up SSH Key
+    if: always()
+    run: rm -f ~/.ssh/snailfront_deploy_key
