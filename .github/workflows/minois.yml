@@ -25,7 +25,6 @@ jobs:
         run: |
           echo "DEBUG: Configuration de la clé SSH..."
           mkdir -p ~/.ssh
-          
           echo "${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}" > ~/.ssh/snailfront_deploy_key
           chmod 600 ~/.ssh/snailfront_deploy_key
 
@@ -82,6 +81,6 @@ echo "DEBUG: Déploiement sur SnailFront terminé."
   EOF_SSH
 echo "DEBUG: Déconnexion SSH effectuée."
 
-  - name: Clean up SSH Key
-    if: always()
-    run: rm -f ~/.ssh/snailfront_deploy_key
+- name: Clean up SSH Key
+  if: always()
+  run: rm -f ~/.ssh/snailfront_deploy_key
