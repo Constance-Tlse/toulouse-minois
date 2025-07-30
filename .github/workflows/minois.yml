@@ -123,11 +123,11 @@ jobs:
             echo "--- Starting deployment on SnailFront ---"
 
             # --- Variable Setup and Validation ---
-            IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
-            CONTAINER_NAME="minois-frontend"
-            API_URL_ENV="${{ secrets.API_URL_SNAILFRONT }}"
-            GHCR_USERNAME="${{ github.actor }}"
-            GHCR_TOKEN="${{ secrets.GITHUB_TOKEN }}"
+            export IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
+            export CONTAINER_NAME="minois-frontend"
+            export API_URL_ENV="${{ secrets.API_URL_SNAILFRONT }}"
+            export GHCR_USERNAME="${{ github.actor }}"
+            export GHCR_TOKEN="${{ secrets.GITHUB_TOKEN }}"
 
             # Validation des variables critiques
             if [ -z "$API_URL_ENV" ]; then
@@ -144,7 +144,6 @@ jobs:
             echo "Configuration validée:"
             echo "- Image: $IMAGE_TO_DEPLOY"
             echo "- Container: $CONTAINER_NAME"
-            echo "- API URL: $API_URL_ENV"
 
             # --- Docker Operations ---
             echo "Logging into ${{ env.REGISTRY }}..."
