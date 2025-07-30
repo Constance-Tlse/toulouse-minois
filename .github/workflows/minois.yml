@@ -137,7 +137,6 @@ jobs:
             echo "Creating docker-compose.yml..."
             # CORRECTION : Ajout de la clé 'version' et nettoyage de la structure.
             cat << 'EOF' > docker-compose.yml
-version: '3.8'
 services:
   minois-frontend:
     image: ${IMAGE_TO_DEPLOY}
@@ -149,7 +148,7 @@ services:
       - API_URL=${API_URL_ENV}
   EOF
 
-  echo "Pulling the new image: ${IMAGE_TO_DEPLOY}"
+echo "Pulling the new image: ${IMAGE_TO_DEPLOY}"
   docker compose pull
   
   echo "Restarting the container with the new image..."
