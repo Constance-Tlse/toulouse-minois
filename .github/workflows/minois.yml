@@ -1,86 +1,104 @@
-name: Deploy SnailFront
+name: Build and Deploy SnailFront
 
 on:
   push:
     branches:
-      - main
+      - staging
 
 env:
-  SSH_HOST: ${{ secrets.SSH_HOST_SNAILFRONT }}
-  SSH_USER: ${{ secrets.SSH_USER_SNAILFRONT }}
-  APP_DIR_SNAILFRONT: ${{ secrets.LINK_SNAILFRONT }}
-  REGISTRY_USERNAME: ${{ secrets.GHCR_USERNAME }}
-  REGISTRY_TOKEN: ${{ secrets.GHCR_TOKEN }}
+  # Nom de l'image Docker. Utilise le nom du dépôt pour être réutilisable.
+  IMAGE_NAME: ${{ github.repository_owner }}/${{ github.event.repository.name }}
 
 jobs:
-  deploy:
+  build-and-push:
+    name: Build and Push Docker Image
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write # Nécessaire pour pousser l'image sur GHCR
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure SSH Key and Connect to SnailFront
-        id: ssh_to_snailfront
-        run: |
-          echo "DEBUG: Configuration de la clé SSH..."
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}" > ~/.ssh/snailfront_deploy_key
-          chmod 600 ~/.ssh/snailfront_deploy_key
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }} # Utilise le token standard de GHCR
 
-          echo "DEBUG: Test de connexion SSH à SnailFront..."
-          ssh -i ~/.ssh/snailfront_deploy_key \
-              -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              "${{ env.SSH_USER }}"@"${{ env.SSH_HOST }}" \
-              "bash -s" << 'EOF_SSH'
-            # --- Commandes exécutées sur SnailFront ---
-            set -euxo pipefail
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          # Spécifie le Dockerfile à utiliser si ce n'est pas celui à la racine
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          # Passe les arguments de build au Dockerfile
+          build-args: |
+            VITE_REACT_APP_HARVARD_MUSEUM_API=${{ secrets.VITE_REACT_APP_HARVARD_MUSEUM_API }}
 
-            echo "DEBUG: Connexion à GHCR..."
-            echo "${{ env.REGISTRY_TOKEN }}" | docker login ghcr.io -u "${{ env.REGISTRY_USERNAME }}" --password-stdin
-            echo "DEBUG: Connexion GHCR réussie."
+  deploy:
+    name: Deploy to SnailFront VM
+    runs-on: ubuntu-latest
+    needs: build-and-push # Ce job ne se lance que si le build a réussi
 
-            echo "DEBUG: Création du répertoire de l'application et déplacement..."
-            mkdir -p ${{ env.APP_DIR_SNAILFRONT }}
-            cd ${{ env.APP_DIR_SNAILFRONT }}
-            echo "DEBUG: Répertoire actuel sur SnailFront : $(pwd)"
-            echo "DEBUG: Contenu du répertoire avant création de docker-compose.yml :"
-            ls -la
+    steps:
+      - name: Deploy to SnailFront via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST_SNAILFRONT }}
+          username: ${{ secrets.SSH_USER_SNAILFRONT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}
+          script: |
+            # Script exécuté sur la VM SnailFront
+            set -euxo pipefail # Arrête le script en cas d'erreur
 
-            echo "DEBUG: Création de docker-compose.yml..."
-            cat << 'DOCKER_COMPOSE_EOF' > docker-compose.yml
+            # Variables
+            APP_DIR="${{ secrets.LINK_SNAILFRONT }}"
+            IMAGE_TO_DEPLOY="ghcr.io/${{ env.IMAGE_NAME }}:latest"
+            CONTAINER_NAME="minois-frontend"
+            API_URL_ENV="${{ secrets.API_URL_SNAILFRONT }}" # Secret pour l'URL de l'API backend
+
+            echo "--- Début du déploiement sur SnailFront ---"
+
+            # Connexion au GitHub Container Registry
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            # Création du répertoire de l'application
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            # Création du fichier docker-compose.yml
+            echo "Création de docker-compose.yml..."
+            cat << EOF > docker-compose.yml
+
 services:
   minois-frontend:
-    image: ghcr.io/constance-tlse/toulouse-minois:staging
-    container_name: minois-frontend
+    image: ${IMAGE_TO_DEPLOY}
+    container_name: ${CONTAINER_NAME}
     restart: unless-stopped
     ports:
       - "80:80"
     environment:
-      - API_URL=http://10.10.10.3:VOTRE_PORT_BACKEND
-  DOCKER_COMPOSE_EOF
-
-echo "DEBUG: docker-compose.yml créé. Contenu :"
-  cat docker-compose.yml
-  ls -la
-
-            echo "DEBUG: Pull de l'image Docker..."
-            docker compose pull
-            echo "DEBUG: Image téléchargée. Lancement des conteneurs..."
-            docker compose up -d --remove-orphans
-
-            echo "DEBUG: Conteneurs lancés. Nettoyage des images..."
-            docker image prune -f
-
-            echo "DEBUG: Déconnexion de GHCR..."
-            docker logout ghcr.io
-
-echo "DEBUG: Déploiement sur SnailFront terminé."
+      - API_URL=${API_URL_ENV}
+  EOF
   
-  EOF_SSH
-echo "DEBUG: Déconnexion SSH effectuée."
-
-- name: Clean up SSH Key
-  if: always()
-  run: rm -f ~/.ssh/snailfront_deploy_key
+  echo "Pull de la nouvelle image..."
+  docker compose pull
+  
+  echo "Redémarrage du conteneur..."
+  docker compose up -d --remove-orphans
+  
+  echo "Nettoyage des anciennes images..."
+  docker image prune -af
+  
+  echo "Déconnexion de GHCR..."
+  docker logout ghcr.io
+  
+  echo "--- Déploiement terminé avec succès ---"
