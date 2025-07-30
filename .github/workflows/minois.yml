@@ -52,6 +52,10 @@ jobs:
       contents: read
       packages: write # Permission requise pour pousser sur GHCR
 
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tags: ${{ steps.meta.outputs.tags }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -63,8 +67,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.GHCR_USERNAME }}
-          password: ${{ secrets.Minois_deploy }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
@@ -73,9 +77,11 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=true
-            type=sha,prefix=,suffix=,format=short
+            type=sha,prefix={{branch}}-,suffix=,format=short
+            type=ref,event=branch
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -94,6 +100,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: build # Ne s'exécute que si le job 'build' a réussi
+    environment: production # Ajout d'un environnement pour plus de sécurité
 
     steps:
       - name: Deploy to SnailFront via SnailWeb (Jump Host)
@@ -115,49 +122,80 @@ jobs:
             echo "--- Starting deployment on SnailFront ---"
 
             # --- Variable Setup and Validation ---
-            # CORRECTION CRITIQUE : On utilise un tag stable et prévisible comme 'latest'.
             IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
             CONTAINER_NAME="minois-frontend"
             API_URL_ENV="${{ secrets.API_URL_SNAILFRONT }}"
+            GHCR_USERNAME="${{ github.actor }}"
+            GHCR_TOKEN="${{ secrets.GITHUB_TOKEN }}"
 
-            # Sécurité : on arrête le déploiement si un secret critique est manquant.
+            # Validation des variables critiques
             if [ -z "$API_URL_ENV" ]; then
               echo "Error: Le secret API_URL_SNAILFRONT n'est pas défini. Annulation du déploiement."
               exit 1
             fi
 
+            if [ -z "$GHCR_USERNAME" ] || [ -z "$GHCR_TOKEN" ]; then
+              echo "Error: Les credentials GitHub Container Registry ne sont pas définis."
+              exit 1
+            fi
+
             # --- Docker Operations ---
             echo "Logging into ${{ env.REGISTRY }}..."
-            echo "${{ secrets.Minois_deploy }}" | docker login ${{ env.REGISTRY }} -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+            echo "$GHCR_TOKEN" | docker login ${{ env.REGISTRY }} -u "$GHCR_USERNAME" --password-stdin
 
             echo "Ensuring application directory exists..."
             mkdir -p ${{ env.APP_DIR_SNAILFRONT }}
             cd ${{ env.APP_DIR_SNAILFRONT }}
 
             echo "Creating docker-compose.yml..."
-            # CORRECTION : Ajout de la clé 'version' et nettoyage de la structure.
-            cat << 'EOF' > docker-compose.yml
-services:
-  minois-frontend:
-    image: ${IMAGE_TO_DEPLOY}
-    container_name: ${CONTAINER_NAME}
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    environment:
-      - API_URL=${API_URL_ENV}
-  EOF
-
-echo "Pulling the new image: ${IMAGE_TO_DEPLOY}"
-  docker compose pull
-  
-  echo "Restarting the container with the new image..."
-  docker compose up -d --remove-orphans
-  
-  echo "Cleaning up old Docker images..."
-  docker image prune -f
-  
-  echo "Logging out from ${{ env.REGISTRY }}..."
-  docker logout ${{ env.REGISTRY }}
-  
-  echo "--- Deployment finished successfully ---"
+            cat << EOF > docker-compose.yml
+            version: '3.8'
+            services:
+              minois-frontend:
+                image: ${IMAGE_TO_DEPLOY}
+                container_name: ${CONTAINER_NAME}
+                restart: unless-stopped
+                ports:
+                  - "80:80"
+                environment:
+                  - API_URL=${API_URL_ENV}
+                healthcheck:
+                  test: ["CMD", "curl", "-f", "http://localhost:80"] 
+                  interval: 30s
+                  timeout: 10s
+                  retries: 3
+                  start_period: 40s
+            EOF
+            
+            echo "Pulling the new image: ${IMAGE_TO_DEPLOY}"
+            if ! docker compose pull; then
+              echo "Error: Failed to pull the Docker image"
+              exit 1
+            fi
+            
+            echo "Stopping existing container..."
+            docker compose down || true
+            
+            echo "Starting the container with the new image..."
+            if ! docker compose up -d --remove-orphans; then
+              echo "Error: Failed to start the container"
+              exit 1
+            fi
+            
+            echo "Waiting for container to be healthy..."
+            sleep 10
+            
+            # Vérification que le conteneur fonctionne
+            if ! docker compose ps | grep -q "Up"; then
+              echo "Error: Container is not running properly"
+              docker compose logs
+              exit 1
+            fi
+            
+            echo "Cleaning up old Docker images..."
+            docker image prune -f
+            
+            echo "Logging out from ${{ env.REGISTRY }}..."
+            docker logout ${{ env.REGISTRY }}
+            
+            echo "--- Deployment finished successfully ---"
