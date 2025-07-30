@@ -50,7 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write # Permission requise pour pousser sur GHCR
+      packages: write
+      id-token: write # Requis pour l'authentification OIDC
 
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
@@ -67,8 +68,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.Minois_deploy }}
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
