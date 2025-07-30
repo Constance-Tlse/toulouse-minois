@@ -1,13 +1,15 @@
-name: Deploy Minois Front-End
+name: CI/CD for Minois Front-End
 
 on:
+  # Déclenche le déploiement quand du code est poussé sur la branche 'staging'
   push:
     branches:
       - staging
+  # Déclenche les tests quand une Pull Request est ouverte vers 'staging'
   pull_request:
     branches:
       - staging
-
+  # Permet de lancer le workflow manuellement depuis l'interface GitHub
   workflow_dispatch:
 
 env:
@@ -16,14 +18,39 @@ env:
   APP_DIR_SNAILFRONT: /home/deployer-front/minois
 
 jobs:
-  build:
-    name: minois-front-end-deploy
+  # --- JOB 1: S'exécute sur les Pull Requests pour vérifier la qualité du code ---
+  test:
+    name: Lint and Test Code
+    # Ne s'exécute que pour les événements de type 'pull_request'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Assurez-vous que cette version correspond à celle de votre Dockerfile
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: Install client dependencies
+        run: npm install --workspace=client
+
+      - name: Run Biome code quality check
+        run: npm run check --workspace=client
+
+  # --- JOB 2: Construit et pousse l'image Docker après un push sur 'staging' ---
+  build:
+    name: Build and Push Docker Image
+    # Ne s'exécute que sur un push ou un déclenchement manuel
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
-      pull-requests: write
+      packages: write # Permission requise pour pousser sur GHCR
 
     steps:
       - name: Checkout repository
@@ -32,7 +59,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to the GitHub Container Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -61,11 +88,12 @@ jobs:
           build-args: |
             VITE_REACT_APP_HARVARD_MUSEUM_API=${{ secrets.VITE_REACT_APP_HARVARD_MUSEUM_API }}
 
-  # --- JOB 2: Déployer l'image sur la VM finale ---
+  # --- JOB 3: Déploie l'image sur la VM finale ---
   deploy:
     name: Deploy to SnailFront
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    needs: build # Ce job ne se lance que si le job 'build' a réussi
+    needs: build # Ne s'exécute que si le job 'build' a réussi
 
     steps:
       - name: Deploy to SnailFront via SnailWeb (Jump Host)
@@ -84,19 +112,31 @@ jobs:
           script: |
             set -euxo pipefail
 
-            echo "--- Début du déploiement sur SnailFront ---"
+            echo "--- Starting deployment on SnailFront ---"
 
-            IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tags }}"
+            # --- Variable Setup and Validation ---
+            # CORRECTION CRITIQUE : On utilise un tag stable et prévisible comme 'latest'.
+            IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
             CONTAINER_NAME="minois-frontend"
             API_URL_ENV="${{ secrets.API_URL_SNAILFRONT }}"
 
+            # Sécurité : on arrête le déploiement si un secret critique est manquant.
+            if [ -z "$API_URL_ENV" ]; then
+              echo "Error: Le secret API_URL_SNAILFRONT n'est pas défini. Annulation du déploiement."
+              exit 1
+            fi
+
+            # --- Docker Operations ---
+            echo "Logging into ${{ env.REGISTRY }}..."
             echo "${{ secrets.Minois_deploy }}" | docker login ${{ env.REGISTRY }} -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
+            echo "Ensuring application directory exists..."
             mkdir -p ${{ env.APP_DIR_SNAILFRONT }}
             cd ${{ env.APP_DIR_SNAILFRONT }}
 
-            echo "Création de docker-compose.yml..."
-            cat << EOF > docker-compose.yml
+            echo "Creating docker-compose.yml..."
+            # CORRECTION : Ajout de la clé 'version' et nettoyage de la structure.
+            cat << 'EOF' > docker-compose.yml
 version: '3.8'
 services:
   minois-frontend:
@@ -108,17 +148,17 @@ services:
     environment:
       - API_URL=${API_URL_ENV}
   EOF
-  
-  echo "Pull de la nouvelle image..."
+
+  echo "Pulling the new image: ${IMAGE_TO_DEPLOY}"
   docker compose pull
   
-  echo "Redémarrage du conteneur avec la nouvelle image..."
+  echo "Restarting the container with the new image..."
   docker compose up -d --remove-orphans
   
-  echo "Nettoyage des anciennes images Docker non utilisées..."
+  echo "Cleaning up old Docker images..."
   docker image prune -f
   
-  echo "Déconnexion de GHCR..."
+  echo "Logging out from ${{ env.REGISTRY }}..."
   docker logout ${{ env.REGISTRY }}
   
-  echo "--- Déploiement terminé avec succès ---"
+  echo "--- Deployment finished successfully ---"
