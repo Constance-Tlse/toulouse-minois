@@ -69,7 +69,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.GHCR_USERNAME }}
-          password: ${{ secrets.Minois_deploy }}
+          password: ${{ secrets.MINOIS_DEPLOY }}
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
