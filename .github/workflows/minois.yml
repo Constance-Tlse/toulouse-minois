@@ -90,7 +90,8 @@ jobs:
             echo "--- Début du déploiement sur SnailFront ---"
 
             # Variables pour plus de clarté
-            IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+            # CORRECTION ICI : On reconstruit le nom de l'image correctement
+            IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
             CONTAINER_NAME="minois-frontend"
             API_URL_ENV="${{ secrets.API_URL_SNAILFRONT }}" # Secret pour l'URL du backend
 
