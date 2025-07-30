@@ -110,7 +110,7 @@ jobs:
           host: ${{ secrets.SNAILFRONT_PRIVATE_IP }}
           username: ${{ secrets.SNAILFRONT_DEPLOY_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}
-          port: 22
+          port: 96
 
           proxy_host: ${{ secrets.SNAILWEB_HOST }}
           proxy_username: ${{ secrets.SNAILWEB_DEPLOY_USERNAME }}
@@ -132,6 +132,7 @@ jobs:
             # Validation des variables critiques
             if [ -z "$API_URL_ENV" ]; then
               echo "Error: Le secret API_URL_SNAILFRONT n'est pas défini. Annulation du déploiement."
+              echo "Valeur actuelle: '$API_URL_ENV'"
               exit 1
             fi
 
@@ -139,6 +140,11 @@ jobs:
               echo "Error: Les credentials GitHub Container Registry ne sont pas définis."
               exit 1
             fi
+
+            echo "Configuration validée:"
+            echo "- Image: $IMAGE_TO_DEPLOY"
+            echo "- Container: $CONTAINER_NAME"
+            echo "- API URL: $API_URL_ENV"
 
             # --- Docker Operations ---
             echo "Logging into ${{ env.REGISTRY }}..."
@@ -149,54 +155,54 @@ jobs:
             cd ${{ env.APP_DIR_SNAILFRONT }}
 
             echo "Creating docker-compose.yml..."
-            cat << EOF > docker-compose.yml
-            version: '3.8'
-            services:
-              minois-frontend:
-                image: ${IMAGE_TO_DEPLOY}
-                container_name: ${CONTAINER_NAME}
-                restart: unless-stopped
-                ports:
-                  - "80:80"
-                environment:
-                  - API_URL=${API_URL_ENV}
-                healthcheck:
-                  test: ["CMD", "curl", "-f", "http://localhost:80"] 
-                  interval: 30s
-                  timeout: 10s
-                  retries: 3
-                  start_period: 40s
-            EOF
-            
-            echo "Pulling the new image: ${IMAGE_TO_DEPLOY}"
-            if ! docker compose pull; then
-              echo "Error: Failed to pull the Docker image"
-              exit 1
-            fi
-            
-            echo "Stopping existing container..."
-            docker compose down || true
-            
-            echo "Starting the container with the new image..."
-            if ! docker compose up -d --remove-orphans; then
-              echo "Error: Failed to start the container"
-              exit 1
-            fi
-            
-            echo "Waiting for container to be healthy..."
-            sleep 10
-            
-            # Vérification que le conteneur fonctionne
-            if ! docker compose ps | grep -q "Up"; then
-              echo "Error: Container is not running properly"
-              docker compose logs
-              exit 1
-            fi
-            
-            echo "Cleaning up old Docker images..."
-            docker image prune -f
-            
-            echo "Logging out from ${{ env.REGISTRY }}..."
-            docker logout ${{ env.REGISTRY }}
-            
-            echo "--- Deployment finished successfully ---"
+            cat << 'EOF' > docker-compose.yml
+version: '3.8'
+services:
+  minois-frontend:
+    image: ${IMAGE_TO_DEPLOY}
+    container_name: ${CONTAINER_NAME}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      - API_URL=${API_URL_ENV}
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+  EOF
+
+echo "Pulling the new image: ${IMAGE_TO_DEPLOY}"
+  if ! docker compose pull; then
+echo "Error: Failed to pull the Docker image"
+  exit 1
+  fi
+  
+  echo "Stopping existing container..."
+  docker compose down || true
+  
+  echo "Starting the container with the new image..."
+  if ! docker compose up -d --remove-orphans; then
+echo "Error: Failed to start the container"
+  exit 1
+  fi
+  
+  echo "Waiting for container to be healthy..."
+  sleep 10
+  
+  # Vérification que le conteneur fonctionne
+  if ! docker compose ps | grep -q "Up"; then
+echo "Error: Container is not running properly"
+  docker compose logs
+  exit 1
+  fi
+  
+  echo "Cleaning up old Docker images..."
+  docker image prune -f
+  
+  echo "Logging out from ${{ env.REGISTRY }}..."
+  docker logout ${{ env.REGISTRY }}
+  
+  echo "--- Deployment finished successfully ---"
