@@ -16,7 +16,8 @@ env:
   APP_DIR_SNAILFRONT: /home/deployer-front/minois
 
 jobs:
-  minois-front-end-deploy:
+  build:
+    name: minois-front-end-deploy
     runs-on: ubuntu-latest
 
     permissions:
@@ -44,14 +45,14 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
-            type=sha,format=short,prefix=sha-
-            type=ref,event=branch
+            type=raw,value=latest,enable=true
+            type=sha,prefix=,suffix=,format=short
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -60,65 +61,71 @@ jobs:
           build-args: |
             VITE_REACT_APP_HARVARD_MUSEUM_API=${{ secrets.VITE_REACT_APP_HARVARD_MUSEUM_API }}
 
+  # --- JOB 2: Déployer l'image sur la VM finale ---
+  deploy:
+    name: Deploy to SnailFront
+    runs-on: ubuntu-latest
+    needs: build # Ce job ne se lance que si le job 'build' a réussi
 
-      - name: Deploy
+    steps:
+      - name: Deploy to SnailFront via SnailWeb (Jump Host)
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SNAILWEB_HOST }}
-          username: ${{ secrets.SNAILWEB_DEPLOY_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY_SNAILWEB }}
-          port: 96
+          # --- Connexion à la VM cible (SnailFront) ---
+          host: ${{ secrets.SNAILFRONT_PRIVATE_IP }}
+          username: ${{ secrets.SNAILFRONT_DEPLOY_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }} # Clé pour la machine FINALE
+          port: 22
+
+          # --- Configuration du Proxy/Bastion (SnailWeb) ---
+          proxy_host: ${{ secrets.SNAILWEB_HOST }}
+          proxy_username: ${{ secrets.SNAILWEB_DEPLOY_USERNAME }}
+          proxy_key: ${{ secrets.SSH_PRIVATE_KEY_SNAILWEB }} # Clé pour le BASTION
+          proxy_port: 96
+
+          # --- Script à exécuter sur la VM FINALE (SnailFront) ---
           script: |
-            mkdir -p ~/.ssh
-            echo "${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}" > ~/.ssh/snailfront_deploy_key
-            chmod 600 ~/.ssh/snailfront_deploy_key
+            set -euxo pipefail # Arrête le script à la moindre erreur
 
-            ssh -i ~/.ssh/snailfront_deploy_key \
-                -o StrictHostKeyChecking=no \
-                -o UserKnownHostsFile=/dev/null \
-                ${{ secrets.SNAILFRONT_DEPLOY_USERNAME }}@${{ secrets.SNAILFRONT_PRIVATE_IP }} << 'EOF'
-            
-            # --- Commandes exécutées sur SnailFront ---
-            # Active le mode débogage et fait échouer le script à la première erreur
-            set -euxo pipefail # <<< LIGNE AJOUTÉE POUR LE DÉBOGAGE
+            echo "--- Début du déploiement sur SnailFront ---"
 
-            echo "DEBUG: Connexion à GHCR..."
-            echo "${{ secrets.Minois_deploy }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
-            echo "DEBUG: Connexion GHCR réussie."
+            # Variables pour plus de clarté
+            IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+            CONTAINER_NAME="minois-frontend"
+            API_URL_ENV="${{ secrets.API_URL_SNAILFRONT }}" # Secret pour l'URL du backend
 
-            echo "DEBUG: Création du répertoire de l'application et déplacement..."
+            # Connexion sécurisée au GitHub Container Registry
+            echo "${{ secrets.Minois_deploy }}" | docker login ${{ env.REGISTRY }} -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+
+            # Création du répertoire de l'application
             mkdir -p ${{ env.APP_DIR_SNAILFRONT }}
             cd ${{ env.APP_DIR_SNAILFRONT }}
-            echo "DEBUG: Répertoire actuel sur SnailFront : $(pwd)"
-            echo "DEBUG: Contenu du répertoire avant création de docker-compose.yml :"
-            ls -la
 
-            echo "DEBUG: Création de docker-compose.yml..."
-            cat << 'DOCKER_COMPOSE_EOF' > docker-compose.yml
+            # Création du fichier docker-compose.yml directement sur le serveur
+            echo "Création de docker-compose.yml..."
+            cat << EOF > docker-compose.yml
             version: '3.8'
             services:
               minois-frontend:
-                image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tags }}
-                container_name: minois-frontend
+                image: ${IMAGE_TO_DEPLOY}
+                container_name: ${CONTAINER_NAME}
                 restart: unless-stopped
                 ports:
                   - "80:80"
                 environment:
-                  - API_URL=http://10.10.10.3:VOTRE_PORT_BACKEND # <<< N'oubliez pas de remplacer VOTRE_PORT_BACKEND
-            DOCKER_COMPOSE_EOF
-            echo "DEBUG: docker-compose.yml créé. Contenu :"
-            cat docker-compose.yml # <<< VÉRIFIE LE CONTENU DU FICHIER
-            ls -la # <<< VÉRIFIE L'EXISTENCE ET LES PERMISSIONS
-
-            echo "DEBUG: Pull de l'image Docker..."
-            docker compose pull
-            echo "DEBUG: Image téléchargée. Lancement des conteneurs..."
-            docker compose up -d --remove-orphans
-            echo "DEBUG: Conteneurs lancés. Nettoyage des images..."
-            docker image prune -f
-            echo "DEBUG: Déconnexion de GHCR..."
-            docker logout ghcr.io
-            echo "DEBUG: Déploiement sur SnailFront terminé."
+                  - API_URL=${API_URL_ENV}
             EOF
 
-            rm ~/.ssh/snailfront_deploy_key
+            echo "Pull de la nouvelle image..."
+            docker compose pull
+
+            echo "Redémarrage du conteneur avec la nouvelle image..."
+            docker compose up -d --remove-orphans
+
+            echo "Nettoyage des anciennes images Docker non utilisées..."
+            docker image prune -af
+
+            echo "Déconnexion de GHCR..."
+            docker logout ${{ env.REGISTRY }}
+
+            echo "--- Déploiement terminé avec succès ---"
