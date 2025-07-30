@@ -71,62 +71,54 @@ jobs:
       - name: Deploy to SnailFront via SnailWeb (Jump Host)
         uses: appleboy/ssh-action@v1.0.3
         with:
-          # --- Connexion à la VM cible (SnailFront) ---
           host: ${{ secrets.SNAILFRONT_PRIVATE_IP }}
           username: ${{ secrets.SNAILFRONT_DEPLOY_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }} # Clé pour la machine FINALE
+          key: ${{ secrets.SSH_PRIVATE_KEY_SNAILFRONT }}
           port: 22
 
-          # --- Configuration du Proxy/Bastion (SnailWeb) ---
           proxy_host: ${{ secrets.SNAILWEB_HOST }}
           proxy_username: ${{ secrets.SNAILWEB_DEPLOY_USERNAME }}
-          proxy_key: ${{ secrets.SSH_PRIVATE_KEY_SNAILWEB }} # Clé pour le BASTION
+          proxy_key: ${{ secrets.SSH_PRIVATE_KEY_SNAILWEB }}
           proxy_port: 96
 
-          # --- Script à exécuter sur la VM FINALE (SnailFront) ---
           script: |
-            set -euxo pipefail # Arrête le script à la moindre erreur
+            set -euxo pipefail
 
             echo "--- Début du déploiement sur SnailFront ---"
 
-            # Variables pour plus de clarté
-            # CORRECTION ICI : On reconstruit le nom de l'image correctement
-            IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest"
+            IMAGE_TO_DEPLOY="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tags }}"
             CONTAINER_NAME="minois-frontend"
-            API_URL_ENV="${{ secrets.API_URL_SNAILFRONT }}" # Secret pour l'URL du backend
+            API_URL_ENV="${{ secrets.API_URL_SNAILFRONT }}"
 
-            # Connexion sécurisée au GitHub Container Registry
             echo "${{ secrets.Minois_deploy }}" | docker login ${{ env.REGISTRY }} -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
-            # Création du répertoire de l'application
             mkdir -p ${{ env.APP_DIR_SNAILFRONT }}
             cd ${{ env.APP_DIR_SNAILFRONT }}
 
-            # Création du fichier docker-compose.yml directement sur le serveur
             echo "Création de docker-compose.yml..."
             cat << EOF > docker-compose.yml
-            version: '3.8'
-            services:
-              minois-frontend:
-                image: ${IMAGE_TO_DEPLOY}
-                container_name: ${CONTAINER_NAME}
-                restart: unless-stopped
-                ports:
-                  - "80:80"
-                environment:
-                  - API_URL=${API_URL_ENV}
-            EOF
-
-            echo "Pull de la nouvelle image..."
-            docker compose pull
-
-            echo "Redémarrage du conteneur avec la nouvelle image..."
-            docker compose up -d --remove-orphans
-
-            echo "Nettoyage des anciennes images Docker non utilisées..."
-            docker image prune -af
-
-            echo "Déconnexion de GHCR..."
-            docker logout ${{ env.REGISTRY }}
-
-            echo "--- Déploiement terminé avec succès ---"
+version: '3.8'
+services:
+  minois-frontend:
+    image: ${IMAGE_TO_DEPLOY}
+    container_name: ${CONTAINER_NAME}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      - API_URL=${API_URL_ENV}
+  EOF
+  
+  echo "Pull de la nouvelle image..."
+  docker compose pull
+  
+  echo "Redémarrage du conteneur avec la nouvelle image..."
+  docker compose up -d --remove-orphans
+  
+  echo "Nettoyage des anciennes images Docker non utilisées..."
+  docker image prune -f
+  
+  echo "Déconnexion de GHCR..."
+  docker logout ${{ env.REGISTRY }}
+  
+  echo "--- Déploiement terminé avec succès ---"
