@@ -79,7 +79,6 @@ jobs:
           tags: |
             type=raw,value=latest,enable=true
             type=sha,prefix={{branch}}-,suffix=,format=short
-            type=ref,event=branch
 
       - name: Build and push Docker image
         id: build
@@ -188,7 +187,7 @@ jobs:
 
             # --- Docker Operations ---
             echo "Logging into ${{ env.REGISTRY }}..."
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
+            echo "${{ secrets.MINOIS_DEPLOY }}" | docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
 
             echo "Pulling the new image..."
             docker compose pull
