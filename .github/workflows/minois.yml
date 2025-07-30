@@ -156,53 +156,53 @@ jobs:
 
             echo "Creating docker-compose.yml..."
             cat << 'EOF' > docker-compose.yml
-version: '3.8'
-services:
-  minois-frontend:
-    image: ${IMAGE_TO_DEPLOY}
-    container_name: ${CONTAINER_NAME}
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    environment:
-      - API_URL=${API_URL_ENV}
-    healthcheck:
-      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-  EOF
+            version: '3.8'
+            services:
+              minois-frontend:
+                image: ${IMAGE_TO_DEPLOY}
+                container_name: ${CONTAINER_NAME}
+                restart: unless-stopped
+                ports:
+                  - "80:80"
+                environment:
+                  - API_URL=${API_URL_ENV}
+                healthcheck:
+                  test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80" ]
+                  interval: 30s
+                  timeout: 10s
+                  retries: 3
+                  start_period: 40s
+            EOF
 
-echo "Pulling the new image: ${IMAGE_TO_DEPLOY}"
-  if ! docker compose pull; then
-echo "Error: Failed to pull the Docker image"
-  exit 1
-  fi
-  
-  echo "Stopping existing container..."
-  docker compose down || true
-  
-  echo "Starting the container with the new image..."
-  if ! docker compose up -d --remove-orphans; then
-echo "Error: Failed to start the container"
-  exit 1
-  fi
-  
-  echo "Waiting for container to be healthy..."
-  sleep 10
-  
-  # Vérification que le conteneur fonctionne
-  if ! docker compose ps | grep -q "Up"; then
-echo "Error: Container is not running properly"
-  docker compose logs
-  exit 1
-  fi
-  
-  echo "Cleaning up old Docker images..."
-  docker image prune -f
-  
-  echo "Logging out from ${{ env.REGISTRY }}..."
-  docker logout ${{ env.REGISTRY }}
-  
-  echo "--- Deployment finished successfully ---"
+            echo "Pulling the new image: ${IMAGE_TO_DEPLOY}"
+            if ! docker compose pull; then
+              echo "Error: Failed to pull the Docker image"
+              exit 1
+            fi
+
+            echo "Stopping existing container..."
+            docker compose down || true
+
+            echo "Starting the container with the new image..."
+            if ! docker compose up -d --remove-orphans; then
+              echo "Error: Failed to start the container"
+              exit 1
+            fi
+
+            echo "Waiting for container to be healthy..."
+            sleep 10
+
+            # Vérification que le conteneur fonctionne
+            if ! docker compose ps | grep -q "Up"; then
+              echo "Error: Container is not running properly"
+              docker compose logs
+              exit 1
+            fi
+
+            echo "Cleaning up old Docker images..."
+            docker image prune -f
+
+            echo "Logging out from ${{ env.REGISTRY }}..."
+            docker logout ${{ env.REGISTRY }}
+
+            echo "--- Deployment finished successfully ---"
